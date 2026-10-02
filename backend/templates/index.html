@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Server Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --border: #2b3240;
+      --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+      --green: #3fb950; --yellow: #d29922; --red: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    header {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding: 14px 22px; background: var(--panel); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 10;
+    }
+    header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    header .host { color: var(--muted); font-size: 13px; }
+    .badge { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px;
+      border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .badge.ok { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.4); }
+    .badge.err { background: rgba(248,81,73,.15); color: var(--red); border: 1px solid rgba(248,81,73,.4); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .spacer { flex: 1; }
+    main { padding: 20px; width: 100%; max-width: 100vw; margin: 0 auto; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    .card .value { font-size: 30px; font-weight: 700; margin: 6px 0 2px; }
+    .card .sub { color: var(--muted); font-size: 12px; }
+    .gauge-wrap { margin-top: 8px; height: 7px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
+    .gauge-fill { height: 100%; border-radius: 6px; transition: width .6s ease; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+    .grid3 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+    @media (max-width: 1400px) { .grid3 { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 800px) { .grid3 { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .panel h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+    .chart-box { position: relative; height: 200px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    @media (max-width: 900px) { .row2 { grid-template-columns: 1fr; } }
+    .disk-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13px; }
+    .disk-row .m { width: 90px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .disk-track { flex: 1; height: 10px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
+    .disk-fill { height: 100%; background: var(--accent); }
+    .disk-row .p { width: 62px; text-align: right; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+    th { color: var(--muted); font-weight: 600; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .errbox { background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.4); color: var(--red);
+      padding: 14px; border-radius: 12px; text-align: center; }
+    .net-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+    .net-row .rx { color: var(--accent); } .net-row .tx { color: var(--green); }
+    .muted { color: var(--muted); }
+    .card { position: relative; }
+    .drag-h {
+      position: absolute; top: 4px; right: 6px;
+      cursor: grab; font-size: 16px; line-height: 1;
+      color: var(--muted); opacity: 0; transition: opacity .15s ease;
+      user-select: none; padding: 2px 3px; border-radius: 4px;
+    }
+    .card:hover .drag-h { opacity: 1; }
+    .drag-h:active { cursor: grabbing; }
+    .sort-placeholder { opacity: .3 !important; outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(88,166,255,.12) !important; }
+    .sort-ghost { background: var(--panel2) !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🖥️ Server Dashboard</h1>
+    <span class="host" id="hostInfo">…</span>
+    <span id="statusBadge" class="badge err"><span class="dot"></span><span id="statusText">connecting…</span></span>
+    <span class="spacer"></span>
+    <span class="muted" id="uptime">–</span>
+    <span class="muted" id="lastUpdate">–</span>
+  </header>
+
+  <main>
+    <div id="errorBox" class="errbox" style="display:none"></div>
+
+    <section class="cards" id="statCards">
+      <div class="card"><div class="label">CPU</div><div class="value" id="cCpu">–</div>
+        <div class="sub" id="cCpuSub"></div>
+        <div class="gauge-wrap"><div class="gauge-fill" id="gCpu"></div></div></div>
+      <div class="card"><div class="label">Memory</div><div class="value" id="cMem">–</div>
+        <div class="sub" id="cMemSub"></div>
+        <div class="gauge-wrap"><div class="gauge-fill" id="gMem"></div></div></div>
+      <div class="card"><div class="label">Swap</div><div class="value" id="cSwap">–</div>
+        <div class="sub" id="cSwapSub"></div></div>
+      <div class="card"><div class="label">Load (1/5/15)</div><div class="value" id="cLoad" style="font-size:20px">–</div>
+        <div class="sub" id="cLoadSub"></div></div>
+      <div class="card"><div class="label">Processes</div><div class="value" id="cProcs">–</div>
+        <div class="sub" id="cProcsSub"></div></div>
+      <div class="card"><div class="label">CPUs</div><div class="value" id="cCpus">–</div>
+        <div class="sub" id="cCpusSub"></div></div>
+    </section>
+
+    <section class="cards" id="tempCards">
+      <div class="card"><div class="label">CPU</div><div class="value" id="tCpu">–</div><div class="sub" id="tCpuSub"></div></div>
+      <div class="card"><div class="label">CPU Max (core)</div><div class="value" id="tCpuMax">–</div></div>
+      <div class="card"><div class="label">NVMe</div><div class="value" id="tNvme">–</div></div>
+      <div class="card"><div class="label">GPU</div><div class="value" id="tGpu">–</div><div class="sub" id="tGpuSub"></div></div>
+    </section>
+
+    <section class="panel" id="gpuPanel" style="margin-bottom:14px">
+      <h2>🔹 GPU: <span id="gpuName" style="font-weight:400">detecting…</span></h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+        <div>
+          <div class="label">Temperature</div>
+          <div class="value" id="gpuTempVal" style="font-size:28px;margin:6px 0">–</div>
+          <div class="gauge-wrap"><div class="gauge-fill" id="gpuTempGauge" style="background:var(--green)"></div></div>
+        </div>
+        <div>
+          <div class="label">Utilization</div>
+          <div class="value" id="gpuUtilVal" style="font-size:28px;margin:6px 0">–</div>
+          <div class="gauge-wrap"><div class="gauge-fill" id="gpuUtilGauge" style="background:var(--green)"></div></div>
+        </div>
+        <div>
+          <div class="label">GPU Memory</div>
+          <div class="value" id="gpuMemVal" style="font-size:20px;margin:6px 0">–</div>
+          <div class="gauge-wrap"><div class="gauge-fill" id="gpuMemGauge" style="background:var(--accent)"></div></div>
+        </div>
+      </div>
+      <div style="margin-top:18px">
+        <div class="label" style="margin-bottom:6px">GPU Processes</div>
+        <table><thead><tr><th>PID</th><th class="num">Memory Used</th></tr></thead><tbody id="gpuProcs"></tbody></table>
+      </div>
+    </section>
+
+    <section class="grid3">
+      <div class="panel"><h2>CPU usage %</h2><div class="chart-box"><canvas id="cpuChart"></canvas></div></div>
+      <div class="panel"><h2>Memory used (MB)</h2><div class="chart-box"><canvas id="memChart"></canvas></div></div>
+      <div class="panel"><h2>Network I/O</h2>
+        <div style="margin-bottom:8px">
+          <div class="net-row"><span>Now <span class="rx" id="netRx">–</span> <span class="muted">rx</span> / <span class="tx" id="netTx">–</span> <span class="muted">tx</span></div>
+          <div class="net-row"><span class="muted">Total <span class="rx" id="totRx">–</span> / <span class="tx" id="totTx">–</span></div>
+        </div>
+        <div class="chart-box"><canvas id="netChart"></canvas></div>
+      </div>
+      <div class="panel"><h2>Load average</h2><div class="chart-box"><canvas id="loadChart"></canvas></div></div>
+      <div class="panel"><h2>Per-core CPU</h2><div class="chart-box"><canvas id="coreChart"></canvas></div></div>
+      <div class="panel"><h2>Disk usage</h2><div id="diskList"></div></div>
+    </section>
+
+    <section class="row2">
+      <div class="panel"><h2>Top processes — CPU</h2>
+        <table><thead><tr><th>Command</th><th class="num">%CPU</th><th class="num">%Mem</th></tr></thead><tbody id="topCpu"></tbody></table></div>
+      <div class="panel"><h2>Top processes — Memory</h2>
+        <table><thead><tr><th>Command</th><th class="num">%Mem</th><th class="num">%CPU</th></tr></thead><tbody id="topMem"></tbody></table></div>
+    </section>
+  </main>
+
+  <script>
+    const GRID = 'rgba(255,255,255,0.07)';
+    const TXT = 'rgba(255,255,255,0.6)';
+    const axisCfg = { x: { ticks: { color: TXT, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { color: GRID } },
+                      y: { ticks: { color: TXT }, grid: { color: GRID }, beginAtZero: false } };
+    const legend = { labels: { color: TXT } };
+    let cpuC, memC, netC, loadC, coreC;
+    const WINDOW = 60;
+
+    function initCharts() {
+      cpuC = new Chart(document.getElementById('cpuChart'), {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'CPU %', data: [], borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,.12)', fill: true, tension: .3, pointRadius: 0 }] },
+        options: { animation: false, scales: axisCfg, legend, plugins: { legend } },
+      });
+      memC = new Chart(document.getElementById('memChart'), {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'Used MB', borderColor: '#d29922', backgroundColor: 'rgba(210,153,34,.12)', fill: true, tension: .3, pointRadius: 0 }] },
+        options: { animation: false, scales: Object.assign({}, axisCfg, { y: { ...axisCfg.y, atBottom: true } }), legend, plugins: { legend } },
+      });
+      netC = new Chart(document.getElementById('netChart'), {
+        type: 'line',
+        data: { labels: [], datasets: [
+          { label: 'rx KB/s', borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,.10)', fill: true, tension: .3, pointRadius: 0 },
+          { label: 'tx KB/s', borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.10)', fill: true, tension: .3, pointRadius: 0 },
+        ] },
+        options: { animation: false, scales: axisCfg, legend, plugins: { legend } },
+      });
+      loadC = new Chart(document.getElementById('loadChart'), {
+        type: 'line',
+        data: { labels: [], datasets: [
+          { label: 'load1', borderColor: '#f85149', borderDash: [], tension: .3, pointRadius: 0 },
+          { label: 'load5', borderColor: '#d29922', tension: .3, pointRadius: 0 },
+          { label: 'load15', borderColor: '#8b949e', tension: .3, pointRadius: 0 },
+        ] },
+        options: { animation: false, scales: axisCfg, legend, plugins: { legend } },
+      });
+      coreC = new Chart(document.getElementById('coreChart'), {
+        type: 'bar',
+        data: { labels: [], datasets: [{ label: 'core %', data: [], backgroundColor: 'rgba(88,166,255,.7)' }] },
+        options: { animation: false, indexAxis: 'y', scales: Object.assign({}, axisCfg, { x: { ...axisCfg.x, max: 100 } }), legend, plugins: { legend } },
+      });
+    }
+
+    function fmtBytes(b) {
+      b = Number(b) || 0;
+      if (b < 1024) return b.toFixed(0) + ' B/s';
+      if (b < 1048576) return (b / 1024).toFixed(1) + ' KB/s';
+      return (b / 1048576).toFixed(2) + ' MB/s';
+    }
+    function fmtUp(s) {
+      s = Number(s) || 0; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+      return d ? d + 'd ' + h + 'h ' + m + 'm' : h + 'h ' + m + 'm';
+    }
+    function fmtMem(kb) {
+      kb = Number(kb) || 0; return (kb / 1024).toFixed(0) + ' MB';
+    }
+    function colorFor(pct) {
+      if (pct >= 90) return 'var(--red)';
+      if (pct >= 70) return 'var(--yellow)';
+      return 'var(--green)';
+    }
+
+    async function load() {
+      try {
+        const r = await fetch('/api/history?points=' + WINDOW);
+        return await r.json();
+      } catch (e) { return []; }
+    }
+
+    function render(hist) {
+      if (!hist || hist.length === 0) return;
+      const L = hist[hist.length - 1];
+      if (L.error) {
+        document.getElementById('errorBox').style.display = 'block';
+        document.getElementById('errorBox').textContent = 'Could not collect metrics: ' + L.error + (L._stderr ? ' [' + L._stderr + ']' : '');
+        setStatus(false, 'error');
+        return;
+      }
+      document.getElementById('errorBox').style.display = 'none';
+      setStatus(true, 'online');
+      document.getElementById('hostInfo').textContent = L._host || '';
+      document.getElementById('uptime').textContent = '⏯ ' + fmtUp(L.uptime || 0);
+      document.getElementById('lastUpdate').textContent = 'updated ' + new Date(L.ts).toLocaleTimeString();
+
+      // CPU
+      document.getElementById('cCpu').textContent = (L.cpu_total || 0).toFixed(1) + '%';
+      document.getElementById('cCpuSub').textContent = 'core avg · ' + (L.ncpu || 0) + ' CPUs';
+      setGauge('gCpu', L.cpu_total || 0, colorFor(L.cpu_total || 0));
+
+      // Memory
+      document.getElementById('cMem').textContent = (L.mem_used_pct || 0).toFixed(0) + '%';
+      document.getElementById('cMemSub').textContent = fmtMem(L.mem_used) + ' / ' + fmtMem(L.mem_total) + ' · avail ' + (L.mem_available_pct || 0).toFixed(0) + '%';
+      setGauge('gMem', L.mem_used_pct || 0, colorFor(L.mem_used_pct || 0));
+
+      // Swap
+      document.getElementById('cSwap').textContent = (L.swap_used_pct || 0).toFixed(0) + '%';
+      document.getElementById('cSwapSub').textContent = fmtMem(L.swap_used) + ' / ' + fmtMem(L.swap_total);
+
+      // Load
+      document.getElementById('cLoad').textContent = (L.load || [0,0,0]).map(x => x.toFixed(2)).join('  ');
+      document.getElementById('cLoadSub').textContent = 'procs ' + (L.nprocs || 0);
+
+      // Processes / CPUs
+      document.getElementById('cProcs').textContent = (L.nprocs || 0);
+      document.getElementById('cProcsSub').textContent = 'threads/ps';
+      document.getElementById('cCpus').textContent = (L.ncpu || 0);
+      document.getElementById('cCpusSub').textContent = 'logical cores';
+
+      renderTemps(L);
+      renderGPU(L);
+
+      // Network
+      let rx = 0, tx = 0, totRx = 0, totTx = 0;
+      (L.net || []).forEach(n => { rx += n.rx_rate || 0; tx += n.tx_rate || 0; totRx += n.rx || 0; totTx += n.tx || 0; });
+      document.getElementById('netRx').textContent = fmtBytes(rx);
+      document.getElementById('netTx').textContent = fmtBytes(tx);
+      document.getElementById('totRx').textContent = fmtBytes(totRx);
+      document.getElementById('totTx').textContent = fmtBytes(totTx);
+
+      // Charts
+      const labels = hist.map(h => new Date(h.ts).toLocaleTimeString());
+      cpuC.data.labels = labels;
+      cpuC.data.datasets[0].data = hist.map(h => h.cpu_total || 0);
+      cpuC.update();
+
+      memC.data.labels = labels;
+      memC.data.datasets[0].data = hist.map(h => (h.mem_used || 0) / 1024);
+      memC.update();
+
+      netC.data.labels = labels;
+      netC.data.datasets[0].data = hist.map(h => sumRate(h, 'rx_rate'));
+      netC.data.datasets[1].data = hist.map(h => sumRate(h, 'tx_rate'));
+      netC.update();
+
+      loadC.data.labels = labels;
+      loadC.data.datasets[0].data = hist.map(h => (h.load || [0])[0]);
+      loadC.data.datasets[1].data = hist.map(h => (h.load || [0])[1]);
+      loadC.data.datasets[2].data = hist.map(h => (h.load || [0])[2]);
+      loadC.update();
+
+      const cores = L.cores || {};
+      const coreLabels = Object.keys(cores);
+      coreC.data.labels = coreLabels;
+      coreC.data.datasets[0].data = coreLabels.map(c => cores[c]);
+      coreC.update();
+
+      // Disk
+      const dl = document.getElementById('diskList'); dl.innerHTML = '';
+      (L.disks || []).forEach(d => {
+        const row = document.createElement('div'); row.className = 'disk-row';
+        row.innerHTML = '<span class="m" title="' + d.mount + '">' + d.mount + '</span>' +
+          '<span class="disk-track"><span class="disk-fill" style="width:' + Math.min(100, d.pct) + '%;background:' + colorFor(d.pct) + '"></span></span>' +
+          '<span class="p">' + d.pct + '%</span>';
+        dl.appendChild(row);
+      });
+
+      // Top processes
+      const tc = document.getElementById('topCpu'); tc.innerHTML = '';
+      (L.procs_cpu || []).forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td title="' + p.name + '">' + p.name + '</td><td class="num">' + p.cpu.toFixed(1) + '</td><td class="num">' + p.mem.toFixed(1) + '</td>';
+        tc.appendChild(tr);
+      });
+      const tm = document.getElementById('topMem'); tm.innerHTML = '';
+      (L.procs_mem || []).forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td title="' + p.name + '">' + p.name + '</td><td class="num">' + p.mem.toFixed(1) + '</td><td class="num">' + p.cpu.toFixed(1) + '</td>';
+        tm.appendChild(tr);
+      });
+    }
+
+    function sumRate(h, key) { let s = 0; (h.net || []).forEach(n => s += n[key] || 0); return s / 1024; }
+    function setGauge(id, pct, color) {
+      const el = document.getElementById(id);
+      el.style.width = Math.min(100, Math.max(0, pct)) + '%';
+      el.style.background = color;
+    }
+    function setText(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+    function renderTemps(L) {
+      const temps = L.temps || [];
+      const cpuPkg = temps.find(t => t.source === 'CPU_PACKAGE') || temps.find(t => /package/i.test(t.label + t.source));
+      const nvme = temps.find(t => t.source === 'nvme');
+      const cores = temps.filter(t => /Core/i.test(t.label));
+      const cpuMax = cores.length ? Math.max(...cores.map(t => t.c)) : (cpuPkg ? cpuPkg.c : null);
+      const gt = L.gpu_temp || 0;
+      setText('tCpu', cpuPkg ? cpuPkg.c.toFixed(0) + ' C' : '–');
+      setText('tCpuSub', cpuPkg ? cpuPkg.source.replace(/_/g, ' ') : '');
+      setText('tCpuMax', cpuMax != null ? cpuMax.toFixed(0) + ' C' : '–');
+      setText('tNvme', nvme ? nvme.c.toFixed(0) + ' C' : '–');
+      setText('tGpu', gt ? gt.toFixed(0) + ' C' : '–');
+      setText('tGpuSub', gt ? (L.gpu_util || 0).toFixed(0) + '% util' : '');
+    }
+    function renderGPU(L) {
+      const gpu = (L.gpu && L.gpu.length) ? L.gpu[0] : null;
+      if (!gpu) { setText('gpuName', 'no GPU detected'); return; }
+      setText('gpuName', gpu.name);
+      const gt = L.gpu_temp || 0, gu = L.gpu_util || 0;
+      const used = L.gpu_mem_used || 0, tot = L.gpu_mem_total || 1;
+      setText('gpuTempVal', gt.toFixed(0) + ' C');
+      setGauge('gpuTempGauge', Math.min(100, gt), colorFor(gt));
+      setText('gpuUtilVal', gu.toFixed(0) + ' %');
+      setGauge('gpuUtilGauge', gu, colorFor(gu));
+      setText('gpuMemVal', (used / 1024).toFixed(1) + ' / ' + (tot / 1024).toFixed(0) + ' GB');
+      setGauge('gpuMemGauge', tot > 0 ? used / tot * 100 : 0, colorFor(tot > 0 ? used / tot * 100 : 0));
+      const tb = document.getElementById('gpuProcs'); tb.innerHTML = '';
+      if (!L.gpu_procs || L.gpu_procs.length === 0) {
+        tb.innerHTML = '<tr><td colspan="2" class="muted">idle</td></tr>';
+      } else {
+        L.gpu_procs.forEach(pr => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + pr.pid + '</td><td class="num">' + pr.mem + ' MiB</td>';
+          tb.appendChild(tr);
+        });
+      }
+    }
+    function addDragHandles() {
+      document.querySelectorAll('.cards .card').forEach(function (card) {
+        if (!card.querySelector('.drag-h')) {
+          var h = document.createElement('span');
+          h.className = 'drag-h';
+          h.textContent = '⠿';
+          h.title = 'Drag to reorder';
+          card.appendChild(h);
+        }
+      });
+    }
+    function initSortableRow(el, key) {
+      if (!window.Sortable) return;
+      addDragHandles();
+      el.querySelectorAll('.card').forEach(function (card) {
+        var label = card.querySelector('.label');
+        card.dataset.sortId = label ? label.textContent.trim() : (card.dataset.sortId || 'r' + Math.random());
+      });
+      var saved = null;
+      try { saved = localStorage.getItem(key); } catch (e) { saved = null; }
+      if (saved) {
+        try {
+          var order = JSON.parse(saved);
+          var kids = Array.from(el.children);
+          var map = {};
+          kids.forEach(function (c) { map[c.dataset.sortId] = c; });
+          order.forEach(function (id) { if (map[id]) el.appendChild(map[id]); });
+          kids.forEach(function (c) { if (order.indexOf(c.dataset.sortId) === -1) el.appendChild(c); });
+        } catch (e) { /* ignore */ }
+      }
+      new Sortable(el, {
+        animation: 150,
+        handle: '.drag-h',
+        placeholderClass: 'sort-placeholder',
+        ghostClass: 'sort-ghost',
+        onEnd: function () {
+          var order = Array.from(el.children).map(function (c) { return c.dataset.sortId; });
+          try { localStorage.setItem(key, JSON.stringify(order)); } catch (e) { /* ignore */ }
+        },
+      });
+    }
+    function initDragDrop() {
+      initSortableRow(document.getElementById('statCards'), 'ds-statcards');
+      initSortableRow(document.getElementById('tempCards'), 'ds-tempcards');
+    }
+    function setStatus(ok, text) {
+      const b = document.getElementById('statusBadge');
+      b.className = 'badge ' + (ok ? 'ok' : 'err');
+      document.getElementById('statusText').textContent = text;
+    }
+
+    async function boot() {
+      try {
+        const c = await (await fetch('/api/config')).json();
+        document.getElementById('hostInfo').textContent = c.user + '@' + c.host + ':' + c.port + ' · every ' + c.interval + 's';
+      } catch (e) { /* ignore */ }
+      initCharts();
+      initDragDrop();
+      setInterval(refresh, 3000);
+      await refresh();
+    }
+    async function refresh() { render(await load()); }
+
+    boot();
+  </script>
+</body>
+</html>

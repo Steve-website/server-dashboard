@@ -90,15 +90,15 @@ if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi --query-gpu=index,name,temperature.gpu,utilization.gpu,memory.used,memory.total,memory.free --format=csv,noheader,nounits 2>/dev/null | while IFS=, read -r gidx gname gtemp gutil gused gtotal gfree; do
     [ -z "$gidx" ] && continue
     echo "GPU_NAME $gidx $gname"
-    echo "GPU_TEMP $(awk "BEGIN{printf \"%.1f\", $gtemp}")"
-    echo "GPU_UTIL $(awk "BEGIN{printf \"%.1f\", $gutil}")"
-    echo "GPU_MEM_USED $gused"
-    echo "GPU_MEM_TOTAL $gtotal"
-    echo "GPU_MEM_FREE $gfree"
+    echo "GPU_TEMP $gidx $(awk "BEGIN{printf \"%.1f\", $gtemp}")"
+    echo "GPU_UTIL $gidx $(awk "BEGIN{printf \"%.1f\", $gutil}")"
+    echo "GPU_MEM_USED $gidx $gused"
+    echo "GPU_MEM_TOTAL $gidx $gtotal"
+    echo "GPU_MEM_FREE $gidx $gfree"
   done
-  nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null | while IFS=, read -r gpid gmem; do
+  nvidia-smi --query-compute-apps=gpu_index,pid,used_memory --format=csv,noheader,nounits 2>/dev/null | while IFS=, read -r gidx gpid gmem; do
     [ -z "$gpid" ] && continue
-    echo "GPU_PROC $gpid $gmem"
+    echo "GPU_PROC $gidx $gpid $gmem"
   done
 else
   echo "GPU_NONE 1"
@@ -139,6 +139,10 @@ ps aux --sort=-%mem --no-headers | head -n 5 | awk '{cmd=""; for(i=11;i<=NF;i++)
 """
 
 
+def _gpu_blank(idx) -> dict:
+    return {"idx": str(idx), "name": "", "temp": 0.0, "util": 0.0, "mem_used": 0, "mem_total": 0, "mem_free": 0}
+
+
 def parse_metrics(out: str) -> dict:
     d = {
         "cpu_total": 0.0, "cores": {}, "ncpu": 0, "nprocs": 0,
@@ -151,6 +155,7 @@ def parse_metrics(out: str) -> dict:
         "gpu_temp": 0.0, "gpu_util": 0.0,
         "gpu_mem_used": 0, "gpu_mem_total": 0, "gpu_mem_free": 0,
     }
+    gpus = {}
     for raw in out.splitlines():
         line = raw.strip()
         if not line:
@@ -195,19 +200,20 @@ def parse_metrics(out: str) -> dict:
                     {"mem": float(parts[0]), "cpu": float(parts[1]), "name": parts[2]}
                 )
         elif k == "GPU_NAME":
-            d["gpu"].append({"idx": p[1], "name": " ".join(p[2:])})
+            idx = p[1]
+            gpus.setdefault(idx, _gpu_blank(idx))["name"] = " ".join(p[2:])
         elif k == "GPU_TEMP":
-            d["gpu_temp"] = float(p[1])
+            gpus.setdefault(p[1], _gpu_blank(p[1]))["temp"] = float(p[2])
         elif k == "GPU_UTIL":
-            d["gpu_util"] = float(p[1])
+            gpus.setdefault(p[1], _gpu_blank(p[1]))["util"] = float(p[2])
         elif k == "GPU_MEM_USED":
-            d["gpu_mem_used"] = int(p[1])
+            gpus.setdefault(p[1], _gpu_blank(p[1]))["mem_used"] = int(p[2])
         elif k == "GPU_MEM_TOTAL":
-            d["gpu_mem_total"] = int(p[1])
+            gpus.setdefault(p[1], _gpu_blank(p[1]))["mem_total"] = int(p[2])
         elif k == "GPU_MEM_FREE":
-            d["gpu_mem_free"] = int(p[1])
+            gpus.setdefault(p[1], _gpu_blank(p[1]))["mem_free"] = int(p[2])
         elif k == "GPU_PROC":
-            d["gpu_procs"].append({"pid": p[1], "mem": p[2] if len(p) > 2 else "0"})
+            d["gpu_procs"].append({"idx": p[1], "pid": p[2], "mem": p[3] if len(p) > 3 else "0"})
         elif k == "GPU_NONE":
             pass
         elif k == "TEMP":
@@ -219,6 +225,14 @@ def parse_metrics(out: str) -> dict:
                 except ValueError:
                     pass
 
+    d["gpu"] = sorted(gpus.values(), key=lambda x: int(x["idx"]))
+    if d["gpu"]:
+        f = d["gpu"][0]
+        d["gpu_temp"] = f["temp"]
+        d["gpu_util"] = f["util"]
+        d["gpu_mem_used"] = f["mem_used"]
+        d["gpu_mem_total"] = f["mem_total"]
+        d["gpu_mem_free"] = f["mem_free"]
     if d["mem_total"] > 0:
         d["mem_used_pct"] = round(d["mem_used"] / d["mem_total"] * 100, 1)
         d["mem_available_pct"] = round(d["mem_available"] / d["mem_total"] * 100, 1)
@@ -278,7 +292,8 @@ def collect_loop() -> None:
                 f"collected cpu={data.get('cpu_total')}% "
                 f"cores={len(data.get('cores', {}))} "
                 f"mem={data.get('mem_used_pct')}% "
-                f"disks={len(data.get('disks', []))}",
+                f"disks={len(data.get('disks', []))} "
+                f"gpus={len(data.get('gpu', []))}",
                 flush=True,
             )
         except Exception as e:  # noqa: BLE001

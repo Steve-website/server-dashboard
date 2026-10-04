@@ -45,6 +45,11 @@
     @media (max-width: 800px) { .grid3 { grid-template-columns: 1fr; } }
     .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
     .panel h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    .gpu-block { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+    .gpu-title { font-size: 13px; margin: 0 0 12px; font-weight: 600; }
+    .gpu-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    @media (max-width: 700px) { .gpu-stats { grid-template-columns: 1fr; } }
     .chart-box { position: relative; height: 200px; }
     .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
     @media (max-width: 900px) { .row2 { grid-template-columns: 1fr; } }
@@ -113,28 +118,8 @@
     </section>
 
     <section class="panel" id="gpuPanel" style="margin-bottom:14px">
-      <h2>🔹 GPU: <span id="gpuName" style="font-weight:400">detecting…</span></h2>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
-        <div>
-          <div class="label">Temperature</div>
-          <div class="value" id="gpuTempVal" style="font-size:28px;margin:6px 0">–</div>
-          <div class="gauge-wrap"><div class="gauge-fill" id="gpuTempGauge" style="background:var(--green)"></div></div>
-        </div>
-        <div>
-          <div class="label">Utilization</div>
-          <div class="value" id="gpuUtilVal" style="font-size:28px;margin:6px 0">–</div>
-          <div class="gauge-wrap"><div class="gauge-fill" id="gpuUtilGauge" style="background:var(--green)"></div></div>
-        </div>
-        <div>
-          <div class="label">GPU Memory</div>
-          <div class="value" id="gpuMemVal" style="font-size:20px;margin:6px 0">–</div>
-          <div class="gauge-wrap"><div class="gauge-fill" id="gpuMemGauge" style="background:var(--accent)"></div></div>
-        </div>
-      </div>
-      <div style="margin-top:18px">
-        <div class="label" style="margin-bottom:6px">GPU Processes</div>
-        <table><thead><tr><th>PID</th><th class="num">Memory Used</th></tr></thead><tbody id="gpuProcs"></tbody></table>
-      </div>
+      <h2>🔹 GPUs</h2>
+      <div id="gpuBlocks"></div>
     </section>
 
     <section class="grid3">
@@ -354,27 +339,43 @@
       setText('tGpuSub', gt ? (L.gpu_util || 0).toFixed(0) + '% util' : '');
     }
     function renderGPU(L) {
-      const gpu = (L.gpu && L.gpu.length) ? L.gpu[0] : null;
-      if (!gpu) { setText('gpuName', 'no GPU detected'); return; }
-      setText('gpuName', gpu.name);
-      const gt = L.gpu_temp || 0, gu = L.gpu_util || 0;
-      const used = L.gpu_mem_used || 0, tot = L.gpu_mem_total || 1;
-      setText('gpuTempVal', gt.toFixed(0) + ' C');
-      setGauge('gpuTempGauge', Math.min(100, gt), colorFor(gt));
-      setText('gpuUtilVal', gu.toFixed(0) + ' %');
-      setGauge('gpuUtilGauge', gu, colorFor(gu));
-      setText('gpuMemVal', (used / 1024).toFixed(1) + ' / ' + (tot / 1024).toFixed(0) + ' GB');
-      setGauge('gpuMemGauge', tot > 0 ? used / tot * 100 : 0, colorFor(tot > 0 ? used / tot * 100 : 0));
-      const tb = document.getElementById('gpuProcs'); tb.innerHTML = '';
-      if (!L.gpu_procs || L.gpu_procs.length === 0) {
-        tb.innerHTML = '<tr><td colspan="2" class="muted">idle</td></tr>';
-      } else {
-        L.gpu_procs.forEach(pr => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = '<td>' + pr.pid + '</td><td class="num">' + pr.mem + ' MiB</td>';
-          tb.appendChild(tr);
-        });
+      const gpus = L.gpu || [];
+      const container = document.getElementById('gpuBlocks');
+      if (!container) return;
+      container.innerHTML = '';
+      if (!gpus.length) {
+        container.innerHTML = '<div class="gpu-block"><div class="muted">No GPU detected</div></div>';
+        return;
       }
+      gpus.forEach(function (g) {
+        const idx = g.idx;
+        const gt = g.temp || 0, gu = g.util || 0;
+        const used = g.mem_used || 0, tot = g.mem_total || 1;
+        const procs = (L.gpu_procs || []).filter(function (p) { return p.idx === idx; });
+        let rows = '';
+        if (!procs.length) {
+          rows = '<tr><td colspan="2" class="muted">idle</td></tr>';
+        } else {
+          procs.forEach(function (pr) {
+            rows += '<tr><td>' + pr.pid + '</td><td class="num">' + pr.mem + ' MiB</td></tr>';
+          });
+        }
+        const block = document.createElement('div');
+        block.className = 'gpu-block';
+        block.innerHTML =
+          '<div class="gpu-title">' + g.name + '</div>' +
+          '<div class="gpu-stats">' +
+            '<div><div class="label">Temperature</div><div class="value" id="gpuTempVal-' + idx + '">' + gt.toFixed(0) + ' C</div><div class="gauge-wrap"><div class="gauge-fill" id="gpuTempGauge-' + idx + '"></div></div></div>' +
+            '<div><div class="label">Utilization</div><div class="value" id="gpuUtilVal-' + idx + '">' + gu.toFixed(0) + ' %</div><div class="gauge-wrap"><div class="gauge-fill" id="gpuUtilGauge-' + idx + '"></div></div></div>' +
+            '<div><div class="label">GPU Memory</div><div class="value" id="gpuMemVal-' + idx + '">' + (used / 1024).toFixed(1) + ' / ' + (tot / 1024).toFixed(0) + ' GB</div><div class="gauge-wrap"><div class="gauge-fill" id="gpuMemGauge-' + idx + '"></div></div></div>' +
+          '</div>' +
+          '<div class="label" style="margin-top:12px;margin-bottom:6px">GPU Processes</div>' +
+          '<table><thead><tr><th>PID</th><th class="num">Memory Used</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        container.appendChild(block);
+        setGauge('gpuTempGauge-' + idx, Math.min(100, gt), colorFor(gt));
+        setGauge('gpuUtilGauge-' + idx, gu, colorFor(gu));
+        setGauge('gpuMemGauge-' + idx, tot > 0 ? used / tot * 100 : 0, colorFor(tot > 0 ? used / tot * 100 : 0));
+      });
     }
     function addDragHandles() {
       document.querySelectorAll('.cards .card').forEach(function (card) {
